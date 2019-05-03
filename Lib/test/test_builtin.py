@@ -967,6 +967,67 @@ class BuiltinTest(unittest.TestCase):
         self.assertEqual(min(data, key=f),
                          sorted(data, key=f)[0])
 
+    def test_clamp(self):
+        # single values
+        self.assertEqual(clamp(2, 1, 3), 2)
+        self.assertEqual(clamp(-4, 1, 3), 1)
+        self.assertEqual(clamp(7, 1, 3), 3)
+
+        # list and tuples
+        self.assertListEqual(clamp([1, 2, 3, 4, 5, 6], 2, 4), [2, 2, 3, 4, 4, 4])
+        self.assertListEqual(clamp((1, 2, 3, 4, 5, 6), 2, 4), [2, 2, 3, 4, 4, 4])
+
+        # keyword args
+        self.assertEqual(clamp(2, max=3, min=1), 2)
+        self.assertEqual(clamp(-4, max=3, min=1), 1)
+        self.assertEqual(clamp(7, max=3, min=1), 3)
+
+        # min > max
+        self.assertRaises(ValueError, clamp, 2, 3, 1)
+
+        # wrong arguments
+        self.assertRaises(TypeError, clamp)
+        self.assertRaises(TypeError, clamp, 2)
+        self.assertRaises(TypeError, clamp, 2, 1)
+        class BadSeq:
+            def __getitem__(self, index):
+                raise ValueError
+        self.assertRaises(ValueError, clamp, BadSeq(), 1, 3)
+
+        for stmt in (
+            "clamp(key=int)",                    # not enough args
+            "clamp(min=None)",
+            "clamp(max=None)",
+            "clamp(key=int, min=None)",
+            "clamp(key=int, max=None)",
+            "clamp(1, 2, key=int)",
+            "clamp(2, 1, 3, keystone=int)",      # wrong keyword
+            "clamp(2, 1, 3, key=int, abc=int)",  # two many keywords
+            "clamp(2, 1, 3, key=1)",             # keyfunc is not callable
+            ):
+            try:
+                exec(stmt, globals())
+            except TypeError:
+                pass
+            else:
+                self.fail(stmt)
+
+        self.assertEqual(clamp((2,), 1, 3, key=neg), [1])        # one elem iterable
+        self.assertEqual(clamp((-3,4), 1, 3, key=neg), [3, 1])   # two elem iterable
+        self.assertEqual(clamp((1, 2), 1, 3, key=None), [1, 2])
+
+        def custom_clamp(value, minval, maxval):
+            if value > maxval:
+                return maxval
+            if value < minval:
+                return minval
+            return value
+        data = [random.randrange(200) for i in range(100)]
+        keys = dict((elem, random.randrange(50)) for elem in data)
+        clamped_data = [custom_clamp(keys[elem], 10, 20) for elem in data]
+        self.assertEqual(clamp(data, 10, 20, key=keys.__getitem__), clamped_data)
+
+
     def test_next(self):
         it = iter(range(2))
         self.assertEqual(next(it), 0)

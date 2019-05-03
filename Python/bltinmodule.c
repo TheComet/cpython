@@ -1749,6 +1749,115 @@ default keyword-only argument specifies an object to return if\n\
 the provided iterable is empty.\n\
 With two or more arguments, return the largest argument.");
 
+static PyObject *
+clamp_single_value(PyObject *value, PyObject *minval, PyObject *maxval, PyObject* keyfunc)
+{
+    int cmp;
+
+    if (keyfunc != NULL) {
+        value = PyObject_CallFunctionObjArgs(keyfunc, value, NULL);
+        if (value == NULL)
+            return NULL;
+    }
+    else
+        Py_INCREF(value);
+
+    if ((cmp = PyObject_RichCompareBool(value, maxval, Py_GT)) < 0)
+        return Py_DECREF(value), NULL;
+    if (cmp > 0)
+        return Py_INCREF(maxval), maxval;
+
+    if ((cmp = PyObject_RichCompareBool(value, minval, Py_LT)) < 0)
+        return Py_DECREF(value), NULL;
+    if (cmp > 0)
+        return Py_INCREF(minval), minval;
+
+    return value;
+}
+
+static PyObject *
+builtin_clamp(PyObject *self, PyObject *args, PyObject *kwds)
+{
+    int idx, cmp;
+    static char *kwlist[] = {"value", "min", "max", "key", NULL};
+    PyObject *it, *item, *value, *resultlist, *minval, *maxval, *keyfunc=NULL;
+
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "OOO|$O:clamp", kwlist,
+                                     &value, &minval, &maxval, &keyfunc))
+        return NULL;
+
+    /* Make sure minval <= maxval */
+    if ((cmp = PyObject_RichCompareBool(minval, maxval, Py_LE)) < 0)
+        return NULL;
+    if (cmp == 0) {
+        PyErr_SetString(PyExc_ValueError, "min argument must be smaller than max argument");
+        return NULL;
+    }
+
+    /* key is allowed to be None */
+    if (keyfunc == Py_None) {
+        keyfunc = NULL;
+    }
+
+    /* The first positional argument is either a sequence or a single value.
+     * If the latter, we can clamp it directly and return it */
+    if (!PySequence_Check(value))
+        return clamp_single_value(value, minval, maxval, keyfunc);
+
+    it = PyObject_GetIter(value);
+    if (it == NULL)
+        return NULL;
+
+    /* Returned list size is the same size as the input list. It may be
+     * possible to preallocate a list if the input object is a sequence. If
+     * not, we have to append items to the return list as we iterate the input
+     */
+    if (PyList_Check(value) || PyTuple_Check(value))
+        resultlist = PyList_New(PySequence_Fast_GET_SIZE(value));
+    else
+        resultlist = PyList_New(0);
+    if (resultlist == NULL)
+        goto Fail_list_new;
+
+    idx = 0;
+    while (( item = PyIter_Next(it) )) {
+        value = clamp_single_value(item, minval, maxval, keyfunc);
+        if (value == NULL)
+            goto Fail_it;
+
+        /* Either insert or append, depending on whether we could preallocate
+         * the whole list or not. Append does not incref the value if it fails */
+        if (idx == PyList_GET_SIZE(resultlist)) {
+            if (PyList_Append(resultlist, value) < 0) {
+                Py_DECREF(value);
+                goto Fail_it;
+            }
+        }
+        else {
+            PyList_SET_ITEM(resultlist, idx, value);
+        }
+
+        idx++;
+    }
+    if (PyErr_Occurred())
+        goto Fail_it;
+
+    Py_DECREF(it);
+    return resultlist;
+
+Fail_it:
+    Py_DECREF(resultlist);
+Fail_list_new:
+    Py_DECREF(it);
+    return NULL;
+}
+
+PyDoc_STRVAR(clamp_doc,
+"clamp(iterable, min=val, max=val [, key=func]) -> value\n"
+"clamp(value, min=val, max=val [, key=func]) -> value\n"
+"With a single iterable argument, return a new list containing all values"
+"clamped.\n");
+
 
 /*[clinic input]
 oct as builtin_oct
@@ -2759,6 +2868,7 @@ static PyMethodDef builtin_methods[] = {
     BUILTIN_LOCALS_METHODDEF
     {"max",             (PyCFunction)(void(*)(void))builtin_max,        METH_VARARGS | METH_KEYWORDS, max_doc},
     {"min",             (PyCFunction)(void(*)(void))builtin_min,        METH_VARARGS | METH_KEYWORDS, min_doc},
+    {"clamp",           (PyCFunction)(void(*)(void))builtin_clamp,      METH_VARARGS | METH_KEYWORDS, clamp_doc},
     {"next",            (PyCFunction)(void(*)(void))builtin_next,       METH_FASTCALL, next_doc},
     BUILTIN_OCT_METHODDEF
     BUILTIN_ORD_METHODDEF
